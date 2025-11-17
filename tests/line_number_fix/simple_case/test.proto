@@ -1,0 +1,9 @@
+package test;
+
+message TestMsg1 {
+  optional string field1 = 1;
+}
+
+message TestMsg2 {
+  optional TestMsg1 test = 1;  // This should jump to line 4, not line 3
+}
