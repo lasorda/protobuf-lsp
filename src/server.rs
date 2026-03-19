@@ -1,6 +1,8 @@
 use crate::features::{
     format_document, provide_completion, provide_definition_async, provide_document_symbols,
     provide_hover, validate_proto_file, create_parse_diagnostics, find_references,
+    prepare_rename, rename, workspace_symbol, provide_signature_help, provide_code_actions,
+    provide_semantic_tokens_full, provide_folding_ranges, provide_document_links,
 };
 use crate::workspace::WorkspaceManager;
 use dashmap::DashMap;
@@ -73,6 +75,41 @@ impl LanguageServer for ProtobufLanguageServer {
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string()]),
+                    retrigger_characters: Some(vec![",".to_string()]),
+                    work_done_progress_options: Default::default(),
+                }),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        code_action_kinds: Some(vec![
+                            CodeActionKind::QUICKFIX,
+                            CodeActionKind::SOURCE_ORGANIZE_IMPORTS,
+                        ]),
+                        work_done_progress_options: Default::default(),
+                        resolve_provider: None,
+                    },
+                )),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            work_done_progress_options: Default::default(),
+                            legend: crate::features::semantic_tokens::semantic_tokens_legend(),
+                            range: Some(false),
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                        },
+                    ),
+                ),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                document_link_provider: Some(DocumentLinkOptions {
+                    resolve_provider: Some(false),
+                    work_done_progress_options: Default::default(),
+                }),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -261,5 +298,68 @@ impl LanguageServer for ProtobufLanguageServer {
                 }
             }
         }
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        tracing::debug!("Prepare rename request: {:?}", params);
+        let uri = &params.text_document.uri;
+        let content: Option<String> = self.document_contents.get(uri).map(|s| s.clone());
+        Ok(prepare_rename(params, &self.workspace, content.as_deref()))
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        tracing::debug!("Rename request: {:?}", params);
+        let uri = &params.text_document_position.text_document.uri;
+        let content: Option<String> = self.document_contents.get(uri).map(|s| s.clone());
+        Ok(rename(params, &self.workspace, content.as_deref()).await)
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        tracing::debug!("Workspace symbol request: {:?}", params);
+        Ok(workspace_symbol(params, &self.workspace))
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        tracing::debug!("Signature help request: {:?}", params);
+        let uri = &params.text_document_position_params.text_document.uri;
+        let content: Option<String> = self.document_contents.get(uri).map(|s| s.clone());
+        Ok(provide_signature_help(params, &self.workspace, content.as_deref()))
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        tracing::debug!("Code action request: {:?}", params);
+        let uri = &params.text_document.uri;
+        let content: Option<String> = self.document_contents.get(uri).map(|s| s.clone());
+        Ok(provide_code_actions(params, &self.workspace, content.as_deref()))
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        tracing::debug!("Semantic tokens full request: {:?}", params);
+        let uri = &params.text_document.uri;
+        let content: Option<String> = self.document_contents.get(uri).map(|s| s.clone());
+        Ok(provide_semantic_tokens_full(params, &self.workspace, content.as_deref()))
+    }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        tracing::debug!("Folding range request: {:?}", params);
+        let uri = &params.text_document.uri;
+        let content: Option<String> = self.document_contents.get(uri).map(|s| s.clone());
+        Ok(provide_folding_ranges(params, &self.workspace, content.as_deref()))
+    }
+
+    async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        tracing::debug!("Document link request: {:?}", params);
+        let uri = &params.text_document.uri;
+        let content: Option<String> = self.document_contents.get(uri).map(|s| s.clone());
+        Ok(provide_document_links(params, &self.workspace, content.as_deref()))
     }
 }
