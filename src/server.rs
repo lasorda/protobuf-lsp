@@ -1,6 +1,6 @@
 use crate::features::{
     format_document, provide_completion, provide_definition_async, provide_document_symbols,
-    provide_hover, validate_proto_file, create_parse_diagnostics,
+    provide_hover, validate_proto_file, create_parse_diagnostics, find_references,
 };
 use crate::workspace::WorkspaceManager;
 use dashmap::DashMap;
@@ -72,6 +72,7 @@ impl LanguageServer for ProtobufLanguageServer {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -191,6 +192,13 @@ impl LanguageServer for ProtobufLanguageServer {
         } else {
             Ok(provide_hover(params, &self.workspace, None))
         }
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        tracing::debug!("References request: {:?}", params);
+        let uri = &params.text_document_position.text_document.uri;
+        let content: Option<String> = self.document_contents.get(uri).map(|s| s.clone());
+        Ok(find_references(params, &self.workspace, content.as_deref()).await)
     }
 
     async fn document_symbol(

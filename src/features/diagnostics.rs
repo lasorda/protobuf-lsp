@@ -296,24 +296,33 @@ pub fn create_parse_diagnostics(
 }
 
 fn extract_line_from_error(error_str: &str) -> Option<u32> {
-    // Common patterns for line numbers in error messages
-    // Look for patterns like "line X:", "at line X", "L:X", etc.
-    use regex::Regex;
+    // Try "line X:" or "at line X" or "line X"
+    for prefix in &["line ", "at line "] {
+        if let Some(pos) = error_str.find(prefix) {
+            let after = &error_str[pos + prefix.len()..];
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(line_num) = num_str.parse::<u32>() {
+                return Some(line_num.saturating_sub(1)); // Convert to 0-indexed
+            }
+        }
+    }
 
-    let patterns = [
-        r"line\s+(\d+):",
-        r"at line (\d+)",
-        r"L:(\d+)",
-        r"line\s+(\d+)",
-        r":(\d+):\d+:",  // GCC-style: file:line:column:
-    ];
-
-    for pattern in patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            if let Some(caps) = re.captures(error_str) {
-                if let Some(line_match) = caps.get(1) {
-                    if let Ok(line_num) = line_match.as_str().parse::<u32>() {
-                        return Some(line_num.saturating_sub(1)); // Convert to 0-indexed
+    // Try GCC-style "file:line:column:" — look for :digits:digits:
+    // Scan for patterns like ":123:45:"
+    let bytes = error_str.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b':' {
+            let after = &error_str[i + 1..];
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if !num_str.is_empty() {
+                if let Ok(line_num) = num_str.parse::<u32>() {
+                    // Check if followed by :digits:
+                    let rest = &after[num_str.len()..];
+                    if rest.starts_with(':') {
+                        let col_str: String = rest[1..].chars().take_while(|c| c.is_ascii_digit()).collect();
+                        if !col_str.is_empty() && rest[1 + col_str.len()..].starts_with(':') {
+                            return Some(line_num.saturating_sub(1));
+                        }
                     }
                 }
             }
