@@ -8,8 +8,15 @@ A high-performance Protocol Buffers language server implemented in Rust, providi
 - **Code Completion** — Keywords, built-in types, messages, enums, services, and cross-package symbols
 - **Go to Definition** — Jump to message/enum/service definitions across files with smart import resolution
 - **Find References** — Search all references to a symbol across the current file and all imported files
+- **Rename Symbol** — Cross-file renaming for messages, enums, services, fields, and methods with `prepareRename` support
 - **Hover Information** — Display formatted definitions for messages, enums, and services
 - **Document Symbols** — Hierarchical outline of packages, imports, messages, enums, and services
+- **Workspace Symbol** — Fuzzy search across all open files (case-insensitive substring matching)
+- **Signature Help** — RPC method signature display (input/output types, streaming info), triggered by `(`
+- **Code Actions** — Quick fixes (insert missing `syntax`, fix duplicate field numbers) and sort imports
+- **Semantic Tokens** — Full semantic highlighting: type, enum, enumMember, interface, method, property, keyword, namespace, string, number, comment
+- **Folding Ranges** — Code folding for message/enum/service/oneof blocks, contiguous imports, and multi-line comments
+- **Document Links** — Clickable `import` paths that resolve to actual files
 - **Code Formatting** — Integrated clang-format support with `.clang-format` file discovery
 - **Diagnostics** — Real-time parse errors, duplicate name/field number detection, missing syntax warnings
 
@@ -89,6 +96,30 @@ Place cursor on a type name and press `F12` / `Ctrl+Click`. Works for:
 ### Find References
 Place cursor on a symbol name and use "Find All References". Searches the current file and all recursively imported files for whole-word matches.
 
+### Rename Symbol
+Place cursor on a message, enum, service, field, or method name and use "Rename Symbol" (`F2`). All references across the current file and imported files will be updated.
+
+### Workspace Symbol Search
+Use "Go to Symbol in Workspace" (`Ctrl+T` / `Cmd+T`) to fuzzy-search for messages, enums, services, and methods across all open proto files.
+
+### Signature Help
+When editing an `rpc` definition, type `(` to see the method signature including input/output types and streaming information.
+
+### Code Actions
+- **Quick Fix**: When a diagnostic is reported, click the lightbulb or press `Ctrl+.` to see available fixes:
+  - Missing `syntax` declaration → insert `syntax = "proto3";`
+  - Duplicate field number → change to next available number
+- **Sort Imports**: Organize import statements alphabetically via "Source Action → Organize Imports"
+
+### Semantic Highlighting
+Enhanced syntax highlighting via semantic tokens, classifying proto elements as types, enums, enum members, interfaces (services), methods, properties (fields), keywords, namespaces (packages), strings, numbers, and comments.
+
+### Code Folding
+Collapse message, enum, service, and oneof blocks. Contiguous import statements and multi-line comments are also foldable.
+
+### Document Links
+Import paths like `import "path/to/file.proto"` are clickable and navigate to the resolved file.
+
 ### Import Resolution
 The server resolves imports in this order:
 1. **Additional proto directories** (configured via `additionalProtoDirs`, highest priority)
@@ -125,8 +156,15 @@ src/
 │   ├── completion.rs    # Code completion
 │   ├── definition.rs    # Go to definition
 │   ├── references.rs    # Find references
+│   ├── rename.rs        # Rename symbol
 │   ├── hover.rs         # Hover information
 │   ├── symbols.rs       # Document symbols
+│   ├── workspace_symbols.rs # Workspace symbol search
+│   ├── signature_help.rs    # Signature help for RPC methods
+│   ├── code_actions.rs      # Code actions (quick fixes, sort imports)
+│   ├── semantic_tokens.rs   # Semantic token highlighting
+│   ├── folding.rs           # Folding ranges
+│   ├── document_link.rs     # Document links for imports
 │   ├── formatting.rs    # Code formatting (clang-format)
 │   └── diagnostics.rs   # Error diagnostics
 └── workspace/
