@@ -97,6 +97,7 @@ fn extract_import_path_at_position(content: &str, position: Position) -> Option<
     None
 }
 
+#[allow(dead_code)]
 pub fn provide_definition(
     params: GotoDefinitionParams,
     workspace: &WorkspaceManager,

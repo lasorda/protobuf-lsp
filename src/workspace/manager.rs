@@ -21,6 +21,7 @@ pub struct PackageSymbol {
     pub name: String,
     pub full_name: String,
     pub kind: SymbolKind,
+    #[allow(dead_code)]
     pub package: String,
 }
 
@@ -39,6 +40,7 @@ impl WorkspaceManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_additional_dirs(dirs: Vec<PathBuf>) -> Self {
         Self {
             files: Arc::new(DashMap::new()),
@@ -127,6 +129,7 @@ impl WorkspaceManager {
     }
 
     /// Helper function for recursive import collection
+    #[allow(dead_code)]
     fn collect_imports_recursive(
         &self,
         proto: &ParsedProto,
@@ -199,6 +202,7 @@ impl WorkspaceManager {
     }
 
     /// Gets all symbols grouped by package name
+    #[allow(dead_code)]
     pub async fn get_symbols_by_package(&self, current_uri: &Url) -> std::collections::HashMap<String, Vec<PackageSymbol>> {
         let mut symbols_by_package: std::collections::HashMap<String, Vec<PackageSymbol>> = std::collections::HashMap::new();
 

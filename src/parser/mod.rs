@@ -3,7 +3,6 @@ pub mod resolver;
 
 pub use proto::{
     ParsedProto, ProtoElement, ProtoParser, ErrorSeverity,
-    MessageElement, EnumElement, EnumValueElement, ServiceElement,
-    MethodElement, FieldElement, ImportElement,
+    MessageElement,
 };
 pub use resolver::ImportResolver;

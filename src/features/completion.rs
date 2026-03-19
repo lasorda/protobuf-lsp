@@ -60,9 +60,9 @@ pub async fn provide_completion(
 #[derive(Debug, Clone)]
 struct CompletionContext {
     /// Current line text
-    current_line: String,
+    _current_line: String,
     /// Text before cursor on current line
-    prefix: String,
+    _prefix: String,
     /// Whether we're inside a message definition
     in_message: bool,
     /// Whether we're inside an enum definition
@@ -189,8 +189,8 @@ fn get_completion_context(content: &str, position: Position, proto: &ParsedProto
     };
 
     CompletionContext {
-        current_line,
-        prefix,
+        _current_line: current_line,
+        _prefix: prefix,
         in_message,
         in_enum,
         in_service,

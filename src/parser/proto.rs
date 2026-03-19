@@ -22,6 +22,7 @@ pub struct ParseError {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum ErrorSeverity {
     Error,
     Warning,
@@ -57,6 +58,7 @@ pub struct MessageElement {
 
 /// Field definition element
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FieldElement {
     pub name: String,
     pub field_type: String,
@@ -120,6 +122,7 @@ pub enum FieldLabelProto {
 
 /// Protobuf element type
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum ProtoElement {
     Message(MessageElement),
     Enum(EnumElement),
@@ -486,6 +489,7 @@ impl ProtoParser {
     }
 
     /// Clear the cache
+    #[allow(dead_code)]
     pub async fn clear_cache(&self) {
         let mut cache = self.cache.write().await;
         cache.clear();
@@ -570,6 +574,7 @@ fn is_builtin_type(t: &str) -> bool {
 
 impl ParsedProto {
     /// Parse a protobuf file using the new parser
+    #[allow(dead_code)]
     pub async fn parse(uri: String, content: &str) -> Result<Self> {
         let parser = ProtoParser::new();
         parser.parse(uri, content).await

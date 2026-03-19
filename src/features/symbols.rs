@@ -3,6 +3,7 @@ use tower_lsp::lsp_types::{
     DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Position, Range, SymbolKind,
 };
 
+#[allow(deprecated)]
 pub fn provide_document_symbols(
     params: DocumentSymbolParams,
     workspace: &WorkspaceManager,
@@ -76,6 +77,7 @@ pub fn provide_document_symbols(
     Some(DocumentSymbolResponse::Nested(symbols))
 }
 
+#[allow(deprecated)]
 fn create_message_symbol(msg: &crate::parser::proto::MessageElement) -> DocumentSymbol {
     let mut children = Vec::new();
 
@@ -125,6 +127,7 @@ fn create_message_symbol(msg: &crate::parser::proto::MessageElement) -> Document
     }
 }
 
+#[allow(deprecated)]
 fn create_enum_symbol(e: &crate::parser::proto::EnumElement) -> DocumentSymbol {
     let children: Vec<DocumentSymbol> = e
         .values
@@ -193,6 +196,7 @@ fn create_enum_symbol(e: &crate::parser::proto::EnumElement) -> DocumentSymbol {
     }
 }
 
+#[allow(deprecated)]
 fn create_service_symbol(svc: &crate::parser::proto::ServiceElement) -> DocumentSymbol {
     let children: Vec<DocumentSymbol> = svc
         .methods
