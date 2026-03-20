@@ -38,6 +38,7 @@ pub struct ParsedProto {
     pub messages: Vec<MessageElement>,
     pub enums: Vec<EnumElement>,
     pub services: Vec<ServiceElement>,
+    pub extends: Vec<ExtendElement>,
     pub line_to_element: HashMap<u32, ProtoElement>,
     /// Parse errors collected during parsing
     pub parse_errors: Vec<ParseError>,
@@ -86,6 +87,18 @@ pub struct EnumValueElement {
     pub name: String,
     pub number: i32,
     pub line: u32,
+    pub character: u32,
+}
+
+/// Extend definition element - represents `extend SomeMessage { ... }`
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ExtendElement {
+    pub name: String,       // The message name being extended (e.g. "Base")
+    pub full_name: String,  // Fully-qualified name
+    pub fields: Vec<FieldElement>,
+    pub line: u32,
+    pub end_line: u32,
     pub character: u32,
 }
 
@@ -174,6 +187,7 @@ impl ProtoParser {
                     messages: Vec::new(),
                     enums: Vec::new(),
                     services: Vec::new(),
+                    extends: Vec::new(),
                     line_to_element: HashMap::new(),
                     parse_errors: vec![ParseError {
                         message: e.message.clone(),
@@ -201,6 +215,7 @@ impl ProtoParser {
         let mut messages = Vec::new();
         let mut enums = Vec::new();
         let mut services = Vec::new();
+        let mut extends = Vec::new();
         let mut line_to_element = HashMap::new();
 
         for element in &proto.elements {
@@ -216,9 +231,14 @@ impl ProtoParser {
                     });
                 }
                 proto_parser::Element::Message(m) => {
-                    let msg = self.convert_message(m, &package, "");
-                    line_to_element.insert(msg.line, ProtoElement::Message(msg.clone()));
-                    messages.push(msg);
+                    if m.is_extend {
+                        let ext = self.convert_extend(m, &package);
+                        extends.push(ext);
+                    } else {
+                        let msg = self.convert_message(m, &package, "");
+                        line_to_element.insert(msg.line, ProtoElement::Message(msg.clone()));
+                        messages.push(msg);
+                    }
                 }
                 proto_parser::Element::Enum(e) => {
                     let enum_elem = self.convert_enum(e, &package, "");
@@ -242,8 +262,54 @@ impl ProtoParser {
             messages,
             enums,
             services,
+            extends,
             line_to_element,
             parse_errors: Vec::new(),
+        }
+    }
+
+    /// Convert a proto-rs Message with is_extend=true to ExtendElement
+    fn convert_extend(
+        &self,
+        m: &proto_parser::Message,
+        package: &Option<String>,
+    ) -> ExtendElement {
+        let name = m.name.clone();
+        let full_name = if let Some(pkg) = package {
+            format!("{}.{}", pkg, name)
+        } else {
+            name.clone()
+        };
+
+        let mut fields = Vec::new();
+        let mut last_line = pos_line(m.position.line);
+
+        for elem in &m.elements {
+            match elem {
+                proto_parser::Element::NormalField(f) => {
+                    let fe = self.convert_normal_field(f);
+                    if fe.line > last_line {
+                        last_line = fe.line;
+                    }
+                    fields.push(fe);
+                }
+                _ => {}
+            }
+        }
+
+        let end_line = if last_line > pos_line(m.position.line) {
+            last_line + 1
+        } else {
+            pos_line(m.position.line) + 1
+        };
+
+        ExtendElement {
+            name,
+            full_name,
+            fields,
+            line: pos_line(m.position.line),
+            end_line,
+            character: pos_col(m.position.column),
         }
     }
 
@@ -291,11 +357,14 @@ impl ProtoParser {
                     }
                 }
                 proto_parser::Element::Message(nested_m) => {
-                    let nested = self.convert_message(nested_m, package, &full_name);
-                    if nested.end_line > last_line {
-                        last_line = nested.end_line;
+                    // Skip nested extend blocks — they are references, not definitions
+                    if !nested_m.is_extend {
+                        let nested = self.convert_message(nested_m, package, &full_name);
+                        if nested.end_line > last_line {
+                            last_line = nested.end_line;
+                        }
+                        nested_messages.push(nested);
                     }
-                    nested_messages.push(nested);
                 }
                 proto_parser::Element::Enum(nested_e) => {
                     let nested = self.convert_enum(nested_e, package, &full_name);
@@ -654,6 +723,16 @@ impl ParsedProto {
             .find(|s| s.name == name || s.full_name == name)
     }
 
+    /// Find a field by name inside any extend block
+    pub fn find_extend_field_by_name(&self, name: &str) -> Option<(&ExtendElement, &FieldElement)> {
+        for ext in &self.extends {
+            if let Some(field) = ext.fields.iter().find(|f| f.name == name) {
+                return Some((ext, field));
+            }
+        }
+        None
+    }
+
     /// Find method by name in any service
     pub fn find_method_by_name(&self, name: &str) -> Option<(&ServiceElement, &MethodElement)> {
         for service in &self.services {
@@ -760,5 +839,99 @@ message Outer {
 
         let deepest = &inner.nested_messages[0];
         assert_eq!(deepest.name, "Deepest");
+    }
+
+    #[tokio::test]
+    async fn test_parse_extend() {
+        let content = r#"
+syntax = "proto2";
+package test;
+
+message Base {
+    optional string name = 1;
+}
+
+extend Base {
+    optional int32 extra_field = 100;
+}
+
+message Other {
+    optional string value = 1;
+}
+"#;
+
+        let result = ParsedProto::parse("test.proto".to_string(), content).await;
+        assert!(result.is_ok());
+
+        let proto = result.unwrap();
+
+        // extend should NOT appear in messages list
+        assert_eq!(proto.messages.len(), 2, "Should have exactly 2 messages (Base and Other), not the extend");
+        assert_eq!(proto.messages[0].name, "Base");
+        assert_eq!(proto.messages[1].name, "Other");
+
+        // extend should appear in extends list
+        assert_eq!(proto.extends.len(), 1);
+        assert_eq!(proto.extends[0].name, "Base");
+        assert_eq!(proto.extends[0].full_name, "test.Base");
+        assert_eq!(proto.extends[0].fields.len(), 1);
+        assert_eq!(proto.extends[0].fields[0].name, "extra_field");
+
+        // find_message_by_name should find the real Base message, not the extend
+        let base_msg = proto.find_message_by_name("Base");
+        assert!(base_msg.is_some());
+        let base_msg = base_msg.unwrap();
+        assert_eq!(base_msg.fields.len(), 1);
+        assert_eq!(base_msg.fields[0].name, "name");
+    }
+
+    #[tokio::test]
+    async fn test_extend_field_lookup() {
+        // Simulates the real-world scenario:
+        // skbuiltintype.proto defines: extend google.protobuf.MethodOptions { optional string RpcRouteMethod = ...; }
+        // mmsearchmcpproxy.proto uses: option (tlvpickle.RpcRouteMethod) = "kConHash";
+        let content = r#"
+syntax = "proto2";
+package tlvpickle;
+
+message MethodOptions {
+    optional string name = 1;
+}
+
+extend MethodOptions {
+    optional int32 CmdID = 1000000;
+    optional string RpcRouteMethod = 1000015;
+    optional string Brief = 1000005;
+}
+"#;
+
+        let result = ParsedProto::parse("skbuiltintype.proto".to_string(), content).await;
+        assert!(result.is_ok());
+
+        let proto = result.unwrap();
+
+        // extend should NOT be in messages
+        assert_eq!(proto.messages.len(), 1);
+        assert_eq!(proto.messages[0].name, "MethodOptions");
+
+        // extend should be in extends
+        assert_eq!(proto.extends.len(), 1);
+        assert_eq!(proto.extends[0].name, "MethodOptions");
+        assert_eq!(proto.extends[0].fields.len(), 3);
+
+        // find_extend_field_by_name should find RpcRouteMethod
+        let result = proto.find_extend_field_by_name("RpcRouteMethod");
+        assert!(result.is_some());
+        let (ext, field) = result.unwrap();
+        assert_eq!(ext.name, "MethodOptions");
+        assert_eq!(field.name, "RpcRouteMethod");
+
+        // find_extend_field_by_name should find CmdID
+        let result = proto.find_extend_field_by_name("CmdID");
+        assert!(result.is_some());
+
+        // Should NOT find non-existent field
+        let result = proto.find_extend_field_by_name("NonExistent");
+        assert!(result.is_none());
     }
 }
