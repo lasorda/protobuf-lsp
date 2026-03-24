@@ -303,13 +303,17 @@ impl ProtoParser {
             pos_line(m.position.line) + 1
         };
 
+        // position.column points to the keyword "extend", not the name.
+        // Offset by keyword length + 1 (space) to point to the name.
+        let name_column = m.position.column + "extend".len() + 1;
+
         ExtendElement {
             name,
             full_name,
             fields,
             line: pos_line(m.position.line),
             end_line,
-            character: pos_col(m.position.column),
+            character: pos_col(name_column),
         }
     }
 
@@ -384,6 +388,10 @@ impl ProtoParser {
             pos_line(m.position.line) + 1
         };
 
+        // position.column points to the keyword "message", not the name.
+        // Offset by keyword length + 1 (space) to point to the name.
+        let name_column = m.position.column + "message".len() + 1;
+
         MessageElement {
             name,
             full_name,
@@ -392,7 +400,7 @@ impl ProtoParser {
             nested_enums,
             line: pos_line(m.position.line),
             end_line,
-            character: pos_col(m.position.column),
+            character: pos_col(name_column),
         }
     }
 
@@ -492,13 +500,17 @@ impl ProtoParser {
             pos_line(e.position.line) + 1
         };
 
+        // position.column points to the keyword "enum", not the name.
+        // Offset by keyword length + 1 (space) to point to the name.
+        let name_column = e.position.column + "enum".len() + 1;
+
         EnumElement {
             name,
             full_name,
             values,
             line: pos_line(e.position.line),
             end_line,
-            character: pos_col(e.position.column),
+            character: pos_col(name_column),
         }
     }
 
@@ -529,6 +541,10 @@ impl ProtoParser {
                 let input_type = qualify_type_name(&rpc.request_type, package);
                 let output_type = qualify_type_name(&rpc.returns_type, package);
 
+                // rpc.position.column points to the keyword "rpc", not the name.
+                // Offset by keyword length + 1 (space) to point to the name.
+                let method_name_column = rpc.position.column + "rpc".len() + 1;
+
                 methods.push(MethodElement {
                     name: rpc.name.clone(),
                     input_type,
@@ -536,7 +552,7 @@ impl ProtoParser {
                     client_streaming: rpc.streams_request,
                     server_streaming: rpc.streams_returns,
                     line,
-                    character: pos_col(rpc.position.column),
+                    character: pos_col(method_name_column),
                 });
             }
         }
@@ -547,13 +563,17 @@ impl ProtoParser {
             pos_line(s.position.line) + 1
         };
 
+        // position.column points to the keyword "service", not the name.
+        // Offset by keyword length + 1 (space) to point to the name.
+        let name_column = s.position.column + "service".len() + 1;
+
         ServiceElement {
             name,
             full_name,
             methods,
             line: pos_line(s.position.line),
             end_line,
-            character: pos_col(s.position.column),
+            character: pos_col(name_column),
         }
     }
 
@@ -933,5 +953,72 @@ extend MethodOptions {
         // Should NOT find non-existent field
         let result = proto.find_extend_field_by_name("NonExistent");
         assert!(result.is_none());
+    }
+
+    /// Bug reproduction: message/enum/service `character` points to keyword
+    /// position (e.g. "message") instead of the name position (e.g. "UserRequest").
+    /// This causes rename to produce wrong TextEdit ranges that clobber the keyword.
+    #[tokio::test]
+    async fn test_message_character_points_to_name_not_keyword() {
+        let content = "syntax = \"proto3\";\n\nmessage UserRequest {\n    string user_id = 1;\n}\n";
+        // Line 2: "message UserRequest {"
+        //          0123456789...
+        //          ^message  ^UserRequest
+        //          col 0     col 8
+
+        let result = ParsedProto::parse("test.proto".to_string(), content).await;
+        assert!(result.is_ok());
+        let proto = result.unwrap();
+
+        let msg = proto.find_message_by_name("UserRequest").unwrap();
+        // The character should point to the name "UserRequest" at column 8,
+        // NOT to the keyword "message" at column 0.
+        assert_eq!(
+            msg.character, 8,
+            "BUG: message character is {} but should be 8 (pointing to name, not keyword). \
+             Current value points to '{}' instead of the name 'UserRequest'.",
+            msg.character,
+            &"message UserRequest {"[msg.character as usize..msg.character as usize + "UserRequest".len()]
+        );
+    }
+
+    /// Same bug for enum
+    #[tokio::test]
+    async fn test_enum_character_points_to_name_not_keyword() {
+        let content = "syntax = \"proto3\";\n\nenum Status {\n    UNKNOWN = 0;\n}\n";
+        // Line 2: "enum Status {"
+        //          ^enum ^Status
+        //          col 0 col 5
+
+        let result = ParsedProto::parse("test.proto".to_string(), content).await;
+        assert!(result.is_ok());
+        let proto = result.unwrap();
+
+        let e = proto.find_enum_by_name("Status").unwrap();
+        assert_eq!(
+            e.character, 5,
+            "BUG: enum character is {} but should be 5 (pointing to name, not keyword)",
+            e.character
+        );
+    }
+
+    /// Same bug for service
+    #[tokio::test]
+    async fn test_service_character_points_to_name_not_keyword() {
+        let content = "syntax = \"proto3\";\n\nservice UserService {\n    rpc Get(Req) returns (Resp);\n}\nmessage Req {}\nmessage Resp {}\n";
+        // Line 2: "service UserService {"
+        //          ^service ^UserService
+        //          col 0    col 8
+
+        let result = ParsedProto::parse("test.proto".to_string(), content).await;
+        assert!(result.is_ok());
+        let proto = result.unwrap();
+
+        let svc = proto.find_service_by_name("UserService").unwrap();
+        assert_eq!(
+            svc.character, 8,
+            "BUG: service character is {} but should be 8 (pointing to name, not keyword)",
+            svc.character
+        );
     }
 }
