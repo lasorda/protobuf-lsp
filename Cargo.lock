@@ -584,7 +584,8 @@ dependencies = [
 [[package]]
 name = "proto-parser"
 version = "0.1.0"
-source = "git+https://github.com/lasorda/proto-rs.git?branch=master#bbcf4ce46a4e8da282d0ea699c1bda1032727c3c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b03ef176be447e033f0afa08ed3966e6215adf9f894b29aea61bc82186ee3508"
 
 [[package]]
 name = "protobuf-lsp"
