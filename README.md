@@ -28,6 +28,11 @@ A high-performance Protocol Buffers language server implemented in Rust, providi
 
 ## Installation
 
+### From crates.io
+```bash
+cargo install protobuf-lsp
+```
+
 ### Build from Source
 ```bash
 git clone https://github.com/lasorda/protobuf-lsp.git
