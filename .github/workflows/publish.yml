@@ -27,7 +27,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           OUTPUT=$(cargo publish 2>&1) || {
-            if echo "$OUTPUT" | grep -q "already uploaded"; then
+            if echo "$OUTPUT" | grep -q -e "already uploaded" -e "already exists"; then
               echo "Version already published, skipping."
               exit 0
             else
