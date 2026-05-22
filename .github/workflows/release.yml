@@ -61,6 +61,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Cache cargo registry & build
+        if: ${{ !matrix.use-cross }}
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
@@ -77,13 +78,13 @@ jobs:
         if: matrix.use-cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Build release binary
-        run: |
-          if [ "${{ matrix.use-cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+      - name: Build release binary (cross)
+        if: matrix.use-cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build release binary (cargo)
+        if: ${{ !matrix.use-cross }}
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: matrix.os != 'windows-latest'
