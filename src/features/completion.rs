@@ -92,12 +92,17 @@ fn get_completion_context(content: &str, position: Position, proto: &ParsedProto
         String::new()
     };
 
-    let char_index = position.character as usize;
-    let prefix = if char_index <= current_line.len() {
-        current_line[..char_index].to_string()
-    } else {
-        current_line.clone()
+    let char_index = {
+        let pos = position.character as usize;
+        // Clamp to line length and ensure we're on a char boundary
+        let clamped = pos.min(current_line.len());
+        let mut safe = clamped;
+        while safe > 0 && !current_line.is_char_boundary(safe) {
+            safe -= 1;
+        }
+        safe
     };
+    let prefix = current_line.get(..char_index).unwrap_or(&current_line).to_string();
 
     // Check if we're inside various blocks by looking at previous lines
     let mut in_message = false;
@@ -135,18 +140,25 @@ fn get_completion_context(content: &str, position: Position, proto: &ParsedProto
 
     let at_top_level = brace_count == 0;
 
-    // Extract the identifier before cursor
+    // Extract the identifier before cursor using byte-safe iteration
+    // Walk backwards from char_index (a valid byte boundary) to find identifier start
     let mut identifier_start = char_index;
     while identifier_start > 0 {
-        let ch = current_line.chars().nth(identifier_start - 1).unwrap_or(' ');
+        // Find the previous char boundary
+        let mut prev = identifier_start - 1;
+        while prev > 0 && !current_line.is_char_boundary(prev) {
+            prev -= 1;
+        }
+        // Get the character at that boundary
+        let ch = current_line[prev..].chars().next().unwrap_or(' ');
         if ch.is_alphanumeric() || ch == '_' || ch == '.' {
-            identifier_start -= 1;
+            identifier_start = prev;
         } else {
             break;
         }
     }
     let identifier = if identifier_start < char_index {
-        &current_line[identifier_start..char_index]
+        current_line.get(identifier_start..char_index).unwrap_or("")
     } else {
         ""
     };

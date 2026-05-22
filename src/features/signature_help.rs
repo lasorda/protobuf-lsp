@@ -15,7 +15,18 @@ pub fn provide_signature_help(
     let content = content?;
 
     let line_str = content.lines().nth(position.line as usize)?;
-    let before_cursor = &line_str[..position.character as usize];
+    let cursor_byte_offset = {
+        let pos = position.character as usize;
+        // Clamp to line length and ensure we're on a char boundary
+        let clamped = pos.min(line_str.len());
+        // Walk back to nearest char boundary if needed
+        let mut safe = clamped;
+        while safe > 0 && !line_str.is_char_boundary(safe) {
+            safe -= 1;
+        }
+        safe
+    };
+    let before_cursor = &line_str[..cursor_byte_offset];
 
     // Check if we're inside an rpc definition
     let trimmed = line_str.trim();
