@@ -93,6 +93,10 @@ fn create_message_symbol(msg: &crate::parser::proto::MessageElement) -> Document
         children.push(create_enum_symbol(nested_enum));
     }
 
+    // msg.character already points to the name (past the "message " keyword),
+    // so we subtract to get the keyword start position for the full range.
+    let keyword_start = msg.character.saturating_sub("message ".len() as u32);
+
     DocumentSymbol {
         name: msg.name.clone(),
         detail: Some(format!("line {}", msg.line + 1)), // Show line number (1-indexed for display)
@@ -100,7 +104,7 @@ fn create_message_symbol(msg: &crate::parser::proto::MessageElement) -> Document
         range: Range {
             start: Position {
                 line: msg.line,
-                character: msg.character,
+                character: keyword_start,
             },
             end: Position {
                 line: msg.end_line,
@@ -110,11 +114,11 @@ fn create_message_symbol(msg: &crate::parser::proto::MessageElement) -> Document
         selection_range: Range {
             start: Position {
                 line: msg.line,
-                character: msg.character + "message ".len() as u32,
+                character: msg.character,
             },
             end: Position {
                 line: msg.line,
-                character: msg.character + "message ".len() as u32 + msg.name.len() as u32,
+                character: msg.character + msg.name.len() as u32,
             },
         },
         children: if children.is_empty() {
@@ -162,6 +166,10 @@ fn create_enum_symbol(e: &crate::parser::proto::EnumElement) -> DocumentSymbol {
         })
         .collect();
 
+    // e.character already points to the name (past the "enum " keyword),
+    // so we subtract to get the keyword start position for the full range.
+    let keyword_start = e.character.saturating_sub("enum ".len() as u32);
+
     DocumentSymbol {
         name: e.name.clone(),
         detail: Some(format!("line {}", e.line + 1)), // Show line number
@@ -169,7 +177,7 @@ fn create_enum_symbol(e: &crate::parser::proto::EnumElement) -> DocumentSymbol {
         range: Range {
             start: Position {
                 line: e.line,
-                character: e.character,
+                character: keyword_start,
             },
             end: Position {
                 line: e.end_line,
@@ -179,11 +187,11 @@ fn create_enum_symbol(e: &crate::parser::proto::EnumElement) -> DocumentSymbol {
         selection_range: Range {
             start: Position {
                 line: e.line,
-                character: e.character + "enum ".len() as u32,
+                character: e.character,
             },
             end: Position {
                 line: e.line,
-                character: e.character + "enum ".len() as u32 + e.name.len() as u32,
+                character: e.character + e.name.len() as u32,
             },
         },
         children: if children.is_empty() {
@@ -201,35 +209,43 @@ fn create_service_symbol(svc: &crate::parser::proto::ServiceElement) -> Document
     let children: Vec<DocumentSymbol> = svc
         .methods
         .iter()
-        .map(|method| DocumentSymbol {
-            name: method.name.clone(),
-            detail: Some(format!("({}) returns ({}) (line {})", method.input_type, method.output_type, method.line + 1)),
-            kind: SymbolKind::METHOD,
-            range: Range {
-                start: Position {
-                    line: method.line,
-                    character: method.character,
+        .map(|method| {
+            // method.character already points to the name (past the "rpc " keyword)
+            let keyword_start = method.character.saturating_sub("rpc ".len() as u32);
+            DocumentSymbol {
+                name: method.name.clone(),
+                detail: Some(format!("({}) returns ({}) (line {})", method.input_type, method.output_type, method.line + 1)),
+                kind: SymbolKind::METHOD,
+                range: Range {
+                    start: Position {
+                        line: method.line,
+                        character: keyword_start,
+                    },
+                    end: Position {
+                        line: method.line,
+                        character: method.character + method.name.len() as u32,
+                    },
                 },
-                end: Position {
-                    line: method.line,
-                    character: method.character + method.name.len() as u32,
+                selection_range: Range {
+                    start: Position {
+                        line: method.line,
+                        character: method.character,
+                    },
+                    end: Position {
+                        line: method.line,
+                        character: method.character + method.name.len() as u32,
+                    },
                 },
-            },
-            selection_range: Range {
-                start: Position {
-                    line: method.line,
-                    character: method.character,
-                },
-                end: Position {
-                    line: method.line,
-                    character: method.character + method.name.len() as u32,
-                },
-            },
-            children: None,
-            tags: None,
-            deprecated: None,
+                children: None,
+                tags: None,
+                deprecated: None,
+            }
         })
         .collect();
+
+    // svc.character already points to the name (past the "service " keyword),
+    // so we subtract to get the keyword start position for the full range.
+    let keyword_start = svc.character.saturating_sub("service ".len() as u32);
 
     DocumentSymbol {
         name: svc.name.clone(),
@@ -238,7 +254,7 @@ fn create_service_symbol(svc: &crate::parser::proto::ServiceElement) -> Document
         range: Range {
             start: Position {
                 line: svc.line,
-                character: svc.character,
+                character: keyword_start,
             },
             end: Position {
                 line: svc.end_line,
@@ -248,11 +264,11 @@ fn create_service_symbol(svc: &crate::parser::proto::ServiceElement) -> Document
         selection_range: Range {
             start: Position {
                 line: svc.line,
-                character: svc.character + "service ".len() as u32,
+                character: svc.character,
             },
             end: Position {
                 line: svc.line,
-                character: svc.character + "service ".len() as u32 + svc.name.len() as u32,
+                character: svc.character + svc.name.len() as u32,
             },
         },
         children: if children.is_empty() {
