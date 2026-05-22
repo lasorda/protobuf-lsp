@@ -84,6 +84,20 @@ command = "/path/to/protobuf-lsp/target/release/protobuf-lsp"
 additionalProtoDirs = ["/path/to/shared/proto/files"]
 ```
 
+### Zed
+Install the official [Proto extension](https://zed.dev/docs/languages/proto) for Zed, then add to your `settings.json`:
+```jsonc
+{
+    "lsp": {
+        "protobuf-language-server": {
+            "binary": {
+                "path": "protobuf-lsp", // Or /path/to/protobuf-lsp if it isn't in $PATH
+            }
+        }
+    }
+}
+```
+
 ## Usage
 
 ### Code Completion
