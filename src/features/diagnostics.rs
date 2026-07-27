@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::{
     Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
 };
 use tower_lsp::Client;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 pub async fn publish_diagnostics(
     uri: &Url,
@@ -38,34 +38,36 @@ pub async fn validate_proto_file(uri: &Url, workspace: &WorkspaceManager, client
 
         // Check for semantic issues
         diagnostics.extend(validate_semantics(&proto));
+    }
 
-        // Add parse errors from the parser
-        for parse_error in &proto.parse_errors {
-            diagnostics.push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: parse_error.line,
-                        character: parse_error.character,
-                    },
-                    end: Position {
-                        line: parse_error.line,
-                        character: parse_error.character + 10, // Arbitrary end position
-                    },
+    // Add parse errors from the most recent parse attempt (may come from a failed
+    // re-parse while the live cache still serves the last good result). We always
+    // surface these so the user sees live syntax errors while typing.
+    for parse_error in &workspace.get_last_errors(uri) {
+        diagnostics.push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line: parse_error.line,
+                    character: parse_error.character,
                 },
-                severity: Some(match parse_error.severity {
-                    crate::parser::ErrorSeverity::Error => DiagnosticSeverity::ERROR,
-                    crate::parser::ErrorSeverity::Warning => DiagnosticSeverity::WARNING,
-                    crate::parser::ErrorSeverity::Info => DiagnosticSeverity::INFORMATION,
-                }),
-                code: Some(NumberOrString::String("syntax-error".to_string())),
-                source: Some("protobuf-lsp".to_string()),
-                message: parse_error.message.clone(),
-                related_information: None,
-                tags: None,
-                code_description: None,
-                data: None,
-            });
-        }
+                end: Position {
+                    line: parse_error.line,
+                    character: parse_error.character + 10, // Arbitrary end position
+                },
+            },
+            severity: Some(match parse_error.severity {
+                crate::parser::ErrorSeverity::Error => DiagnosticSeverity::ERROR,
+                crate::parser::ErrorSeverity::Warning => DiagnosticSeverity::WARNING,
+                crate::parser::ErrorSeverity::Info => DiagnosticSeverity::INFORMATION,
+            }),
+            code: Some(NumberOrString::String("syntax-error".to_string())),
+            source: Some("protobuf-lsp".to_string()),
+            message: parse_error.message.clone(),
+            related_information: None,
+            tags: None,
+            code_description: None,
+            data: None,
+        });
     }
 
     publish_diagnostics(uri, diagnostics, client).await;
@@ -241,93 +243,4 @@ fn get_file_content(uri: &str) -> Option<String> {
     } else {
         None
     }
-}
-
-// Parse errors from protobuf-parse library
-pub fn create_parse_diagnostics(
-    uri: &Url,
-    parse_result: &Result<crate::parser::ParsedProto>,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
-    if let Err(e) = parse_result {
-        error!("Parse error for {}: {}", uri, e);
-
-        // Try to extract line information from the error message
-        let error_str = e.to_string();
-        if let Some(line_info) = extract_line_from_error(&error_str) {
-            diagnostics.push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: line_info,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: line_info,
-                        character: u32::MAX,
-                    },
-                },
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("parse-error".to_string())),
-                source: Some("protobuf-lsp".to_string()),
-                message: format!("Parse error: {}", error_str),
-                related_information: None,
-                tags: None,
-                code_description: None,
-                data: None,
-            });
-        } else {
-            // If we can't extract line info, show error at the beginning of the file
-            diagnostics.push(Diagnostic {
-                range: Range::default(),
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("parse-error".to_string())),
-                source: Some("protobuf-lsp".to_string()),
-                message: format!("Parse error: {}", error_str),
-                related_information: None,
-                tags: None,
-                code_description: None,
-                data: None,
-            });
-        }
-    }
-
-    diagnostics
-}
-
-fn extract_line_from_error(error_str: &str) -> Option<u32> {
-    // Try "line X:" or "at line X" or "line X"
-    for prefix in &["line ", "at line "] {
-        if let Some(pos) = error_str.find(prefix) {
-            let after = &error_str[pos + prefix.len()..];
-            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if let Ok(line_num) = num_str.parse::<u32>() {
-                return Some(line_num.saturating_sub(1)); // Convert to 0-indexed
-            }
-        }
-    }
-
-    // Try GCC-style "file:line:column:" — look for :digits:digits:
-    // Scan for patterns like ":123:45:"
-    let bytes = error_str.as_bytes();
-    for i in 0..bytes.len() {
-        if bytes[i] == b':' {
-            let after = &error_str[i + 1..];
-            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if !num_str.is_empty() {
-                if let Ok(line_num) = num_str.parse::<u32>() {
-                    // Check if followed by :digits:
-                    let rest = &after[num_str.len()..];
-                    if rest.starts_with(':') {
-                        let col_str: String = rest[1..].chars().take_while(|c| c.is_ascii_digit()).collect();
-                        if !col_str.is_empty() && rest[1 + col_str.len()..].starts_with(':') {
-                            return Some(line_num.saturating_sub(1));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    None
 }

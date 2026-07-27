@@ -21,6 +21,31 @@ pub struct ParseError {
     pub severity: ErrorSeverity,
 }
 
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line {}: {}", self.line + 1, self.message)
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+impl ParseError {
+    /// Best-effort conversion from an `anyhow::Error` produced by the parser.
+    /// The error message is preserved; line/column default to 0 when not available.
+    pub fn from_anyhow(e: &anyhow::Error) -> Self {
+        // If the underlying error is already a ParseError, clone it directly.
+        if let Some(pe) = e.downcast_ref::<ParseError>() {
+            return pe.clone();
+        }
+        Self {
+            message: e.to_string(),
+            line: 0,
+            character: 0,
+            severity: ErrorSeverity::Error,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum ErrorSeverity {
@@ -40,7 +65,14 @@ pub struct ParsedProto {
     pub services: Vec<ServiceElement>,
     pub extends: Vec<ExtendElement>,
     pub line_to_element: HashMap<u32, ProtoElement>,
-    /// Parse errors collected during parsing
+    /// Parse errors collected during parsing.
+    ///
+    /// Note: parse errors are also tracked separately by `WorkspaceManager` (via
+    /// `get_last_errors`) so diagnostics can reflect the most recent parse attempt
+    /// even while the live cache keeps serving the last good result. This field is
+    /// kept on `ParsedProto` for completeness/inspection but is not consulted by
+    /// the diagnostics flow.
+    #[allow(dead_code)]
     pub parse_errors: Vec<ParseError>,
 }
 
@@ -156,7 +188,12 @@ impl ProtoParser {
         }
     }
 
-    /// Parse a protobuf file from content
+    /// Parse a protobuf file from content.
+    ///
+    /// Returns `Ok(ParsedProto)` on success. On parse failure, returns `Err` carrying
+    /// the parse error (line/column/message). Callers (e.g. `WorkspaceManager`) are
+    /// responsible for falling back to the last successful parse result so that LSP
+    /// features such as completion can keep working while the user is typing.
     pub async fn parse(&self, uri: String, content: &str) -> Result<ParsedProto> {
         // Check cache first
         {
@@ -167,9 +204,11 @@ impl ProtoParser {
         }
 
         let parse_result = match proto_parser::Parser::new(content).parse() {
-            Ok(proto) => self.convert_proto(&uri, &proto),
+            Ok(proto) => Ok(self.convert_proto(&uri, &proto)),
             Err(e) => {
-                // Parse failed — return empty result with error
+                // Parse failed — surface the error to the caller. We do NOT fabricate an
+                // empty ParsedProto here; the workspace layer will reuse the last good
+                // result so completion/definition/etc. keep working during editing.
                 let line = if e.position.line > 0 {
                     e.position.line as u32 - 1
                 } else {
@@ -180,32 +219,23 @@ impl ProtoParser {
                 } else {
                     0
                 };
-                ParsedProto {
-                    uri: uri.clone(),
-                    package: None,
-                    imports: Vec::new(),
-                    messages: Vec::new(),
-                    enums: Vec::new(),
-                    services: Vec::new(),
-                    extends: Vec::new(),
-                    line_to_element: HashMap::new(),
-                    parse_errors: vec![ParseError {
-                        message: e.message.clone(),
-                        line,
-                        character,
-                        severity: ErrorSeverity::Error,
-                    }],
+                Err(ParseError {
+                    message: e.message.clone(),
+                    line,
+                    character,
+                    severity: ErrorSeverity::Error,
                 }
+                .into())
             }
         };
 
-        // Cache the result
-        {
+        // Cache only successful parse results
+        if let Ok(ref parsed) = parse_result {
             let mut cache = self.cache.write().await;
-            cache.insert(uri.clone(), parse_result.clone());
+            cache.insert(uri.clone(), parsed.clone());
         }
 
-        Ok(parse_result)
+        parse_result
     }
 
     /// Convert proto-rs AST to our ParsedProto representation

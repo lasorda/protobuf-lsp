@@ -18,7 +18,7 @@ pub use definition::provide_definition_async;
 pub use hover::provide_hover;
 pub use symbols::provide_document_symbols;
 pub use formatting::format_document;
-pub use diagnostics::{validate_proto_file, create_parse_diagnostics};
+pub use diagnostics::validate_proto_file;
 pub use references::find_references;
 pub use rename::{prepare_rename, rename};
 pub use workspace_symbols::workspace_symbol;

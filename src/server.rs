@@ -1,6 +1,6 @@
 use crate::features::{
     format_document, provide_completion, provide_definition_async, provide_document_symbols,
-    provide_hover, validate_proto_file, create_parse_diagnostics, find_references,
+    provide_hover, validate_proto_file, find_references,
     prepare_rename, rename, workspace_symbol, provide_signature_help, provide_code_actions,
     provide_semantic_tokens_full, provide_folding_ranges, provide_document_links,
 };
@@ -140,7 +140,9 @@ impl LanguageServer for ProtobufLanguageServer {
         // Store the document content
         self.document_contents.insert(uri.clone(), content.clone());
 
-        // Parse the file
+        // Parse the file. On a successful parse, the workspace updates its live
+        // cache. On a parse failure, the workspace records the error (for
+        // diagnostics) and retains the last good result, if any.
         match self.workspace.open_file(&uri, &content).await {
             Ok(_) => {
                 self.client
@@ -158,9 +160,10 @@ impl LanguageServer for ProtobufLanguageServer {
                     .log_message(MessageType::ERROR, format!("Parse error: {}", e))
                     .await;
 
-                // Create diagnostics for parse errors
-                let diagnostics = create_parse_diagnostics(&uri, &Err(e));
-                self.client.publish_diagnostics(uri, diagnostics, None).await;
+                // Publish diagnostics derived from the recorded parse error.
+                if let Err(e) = validate_proto_file(&uri, &self.workspace, &self.client).await {
+                    tracing::error!("Failed to validate {}: {}", uri, e);
+                }
             }
         }
     }
@@ -174,7 +177,8 @@ impl LanguageServer for ProtobufLanguageServer {
             // Update stored content
             self.document_contents.insert(uri.clone(), content.clone());
 
-            // Re-parse the file
+            // Re-parse the file. Same semantics as did_open: on failure the workspace
+            // keeps the last good result and records the error for diagnostics.
             match self.workspace.open_file(&uri, content).await {
                 Ok(_) => {
                     // Validate the file and publish diagnostics
@@ -185,9 +189,10 @@ impl LanguageServer for ProtobufLanguageServer {
                 Err(e) => {
                     tracing::error!("Failed to parse {}: {}", uri, e);
 
-                    // Create diagnostics for parse errors
-                    let diagnostics = create_parse_diagnostics(&uri, &Err(e));
-                    self.client.publish_diagnostics(uri, diagnostics, None).await;
+                    // Publish diagnostics derived from the recorded parse error.
+                    if let Err(e) = validate_proto_file(&uri, &self.workspace, &self.client).await {
+                        tracing::error!("Failed to validate {}: {}", uri, e);
+                    }
                 }
             }
         }

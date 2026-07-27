@@ -1,4 +1,4 @@
-use crate::parser::{ParsedProto, ImportResolver, ProtoParser};
+use crate::parser::{ParsedProto, ImportResolver, ProtoParser, ParseError};
 use anyhow::Result;
 use dashmap::DashMap;
 use std::path::{Path, PathBuf};
@@ -29,6 +29,13 @@ pub struct PackageSymbol {
 #[derive(Clone)]
 pub struct WorkspaceManager {
     files: Arc<DashMap<String, Arc<ParsedProto>>>,
+    /// Last successfully parsed result per URI. Used as a fallback when a subsequent
+    /// edit produces a parse error, so LSP features (completion, definition, ...) can
+    /// keep operating on the last known-good state of the file.
+    last_good: Arc<DashMap<String, Arc<ParsedProto>>>,
+    /// Most recent parse errors per URI (for diagnostics). Empty/absent means the last
+    /// parse was successful.
+    last_errors: Arc<DashMap<String, Vec<ParseError>>>,
     resolver: Arc<parking_lot::RwLock<ImportResolver>>,
 }
 
@@ -36,6 +43,8 @@ impl WorkspaceManager {
     pub fn new() -> Self {
         Self {
             files: Arc::new(DashMap::new()),
+            last_good: Arc::new(DashMap::new()),
+            last_errors: Arc::new(DashMap::new()),
             resolver: Arc::new(parking_lot::RwLock::new(ImportResolver::new(vec![]))),
         }
     }
@@ -44,30 +53,70 @@ impl WorkspaceManager {
     pub fn with_additional_dirs(dirs: Vec<PathBuf>) -> Self {
         Self {
             files: Arc::new(DashMap::new()),
+            last_good: Arc::new(DashMap::new()),
+            last_errors: Arc::new(DashMap::new()),
             resolver: Arc::new(parking_lot::RwLock::new(ImportResolver::new(dirs))),
         }
     }
 
-    /// Opens or updates a file in the workspace
+    /// Opens or updates a file in the workspace.
+    ///
+    /// On a successful parse, the new result replaces both the live cache (`files`)
+    /// and the last-good cache (`last_good`), and any previously stored errors are
+    /// cleared. On a parse failure, the live cache is left untouched (it keeps the
+    /// previous successful result, if any) and the error is recorded in `last_errors`
+    /// for diagnostics.
     pub async fn open_file(&self, uri: &Url, content: &str) -> Result<Arc<ParsedProto>> {
         let uri_str = uri.to_string();
         let parser = ProtoParser::new();
-        let parsed: ParsedProto = parser.parse(uri_str.clone(), content).await?;
-        let parsed_arc = Arc::new(parsed);
-        self.files.insert(uri_str, parsed_arc.clone());
-        Ok(parsed_arc)
+
+        match parser.parse(uri_str.clone(), content).await {
+            Ok(parsed) => {
+                let parsed_arc = Arc::new(parsed);
+                self.files.insert(uri_str.clone(), parsed_arc.clone());
+                self.last_good.insert(uri_str.clone(), parsed_arc.clone());
+                self.last_errors.remove(&uri_str);
+                Ok(parsed_arc)
+            }
+            Err(e) => {
+                // Parse failed. Record the error for diagnostics. The live `files`
+                // cache is intentionally left unchanged so consumers keep seeing the
+                // last successful parse result.
+                let parse_error = ParseError::from_anyhow(&e);
+                self.last_errors.insert(uri_str.clone(), vec![parse_error]);
+
+                if let Some(last_good) = self.last_good.get(&uri_str) {
+                    Ok(last_good.clone())
+                } else {
+                    // Never successfully parsed before — propagate the error so the
+                    // caller knows there is no usable result yet.
+                    Err(e)
+                }
+            }
+        }
     }
 
-    /// Gets a parsed proto file from the cache
+    /// Gets a parsed proto file from the live cache. Returns the last successful
+    /// parse result (even if the most recent edit failed to parse).
     pub fn get_file(&self, uri: &Url) -> Option<Arc<ParsedProto>> {
         let uri_str = uri.to_string();
         self.files.get(&uri_str).map(|entry| entry.clone())
+    }
+
+    /// Returns the most recent parse errors for a file, if any. Used by the
+    /// diagnostics layer to report syntax errors even while the live cache still
+    /// serves the last good result to other features.
+    pub fn get_last_errors(&self, uri: &Url) -> Vec<ParseError> {
+        let uri_str = uri.to_string();
+        self.last_errors.get(&uri_str).map(|e| e.clone()).unwrap_or_default()
     }
 
     /// Closes a file (removes from cache)
     pub fn close_file(&self, uri: &Url) {
         let uri_str = uri.to_string();
         self.files.remove(&uri_str);
+        self.last_good.remove(&uri_str);
+        self.last_errors.remove(&uri_str);
     }
 
     /// Resolves an import from a given file

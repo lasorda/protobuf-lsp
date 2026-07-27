@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2026-07-27
+
+### Fixed
+- Completion now works while editing, even when the proto file is temporarily
+  unparseable (e.g. a half-typed field). Previously the parser returned an empty
+  result on any syntax error, which wiped out all known messages/enums/packages
+  and left only keyword completions. The workspace now keeps the last successful
+  parse result and serves completion/definition/hover from it while recording the
+  parse error separately for diagnostics.
+
+### Changed
+- `ProtoParser::parse` now returns `Err(ParseError)` on parse failure instead of
+  fabricating an empty `ParsedProto`.
+- `WorkspaceManager` maintains a `last_good` cache and a `last_errors` cache per
+  file; `get_last_errors` exposes the most recent parse errors for diagnostics.
+- `validate_proto_file` reads parse errors from `workspace.get_last_errors`
+  instead of `ParsedProto::parse_errors`.
+- Removed unused `create_parse_diagnostics` / `extract_line_from_error`.
+
 ## [0.1.0] - 2025-11-16
 
 ### Added
