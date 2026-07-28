@@ -583,13 +583,13 @@ dependencies = [
 
 [[package]]
 name = "proto-parser"
-version = "0.1.0"
+version = "1.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b03ef176be447e033f0afa08ed3966e6215adf9f894b29aea61bc82186ee3508"
+checksum = "c10e0ce3022eceb3fd55e68577249e530fb2d2cfed8a585eb52fd90ab994e734"
 
 [[package]]
 name = "protobuf-lsp"
-version = "0.1.6"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "dashmap 6.1.0",
