@@ -15,7 +15,7 @@ pub mod document_link;
 
 pub use completion::provide_completion;
 pub use definition::provide_definition_async;
-pub use hover::provide_hover;
+pub use hover::provide_hover_async;
 pub use symbols::provide_document_symbols;
 pub use formatting::format_document;
 pub use diagnostics::validate_proto_file;

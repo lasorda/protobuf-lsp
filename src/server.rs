@@ -1,6 +1,6 @@
 use crate::features::{
     format_document, provide_completion, provide_definition_async, provide_document_symbols,
-    provide_hover, validate_proto_file, find_references,
+    provide_hover_async, validate_proto_file, find_references,
     prepare_rename, rename, workspace_symbol, provide_signature_help, provide_code_actions,
     provide_semantic_tokens_full, provide_folding_ranges, provide_document_links,
 };
@@ -230,9 +230,9 @@ impl LanguageServer for ProtobufLanguageServer {
         tracing::debug!("Hover request: {:?}", params);
         let uri = &params.text_document_position_params.text_document.uri;
         if let Some(content) = self.document_contents.get(uri) {
-            Ok(provide_hover(params, &self.workspace, Some(content.as_str())))
+            Ok(provide_hover_async(params, &self.workspace, Some(content.as_str())).await)
         } else {
-            Ok(provide_hover(params, &self.workspace, None))
+            Ok(provide_hover_async(params, &self.workspace, None).await)
         }
     }
 
