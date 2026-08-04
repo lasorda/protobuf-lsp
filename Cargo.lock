@@ -589,7 +589,7 @@ checksum = "c10e0ce3022eceb3fd55e68577249e530fb2d2cfed8a585eb52fd90ab994e734"
 
 [[package]]
 name = "protobuf-lsp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "dashmap 6.1.0",

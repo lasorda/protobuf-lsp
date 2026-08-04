@@ -253,3 +253,315 @@ message Foo {
     workspace.open_file(&url, complete).await.unwrap();
     assert!(workspace.get_last_errors(&url).is_empty());
 }
+
+/// Repro for: completion does not suggest imported proto files' package names.
+///
+/// Setup: a main proto file imports another proto file that declares a different
+/// package. When the user types the imported package's prefix (e.g. `other.`),
+/// the LSP should suggest `other.` as a package completion item.
+#[tokio::test]
+async fn test_completion_suggests_imported_package_name() {
+    use std::fs;
+    use std::path::PathBuf;
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .try_init();
+
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let dir_path = dir.path().to_path_buf();
+
+    // Write the imported proto file with package `other`.
+    let imported_path: PathBuf = dir_path.join("other.proto");
+    let imported_content = r#"syntax = "proto3";
+package other;
+
+message OtherMessage {
+    string name = 1;
+}
+"#;
+    fs::write(&imported_path, imported_content).unwrap();
+
+    // Write the main proto file that imports `other.proto`.
+    let main_path: PathBuf = dir_path.join("main.proto");
+    let main_content = r#"syntax = "proto3";
+package main;
+
+import "other.proto";
+
+message MainMessage {
+    string name = 1;
+}
+"#;
+    fs::write(&main_path, main_content).unwrap();
+
+    let workspace = WorkspaceManager::new();
+    let main_uri = Url::from_file_path(&main_path).unwrap();
+    workspace.open_file(&main_uri, main_content).await.unwrap();
+
+    // The user starts typing the imported package name `o` at top level.
+    // We re-open with the in-progress content where the cursor is right after `o`.
+    let in_progress = r#"syntax = "proto3";
+package main;
+
+import "other.proto";
+
+o
+"#;
+    workspace.open_file(&main_uri, in_progress).await.unwrap();
+
+    // Cursor right after `o` at top level (line 5, character 1).
+    let labels = run_completion(
+        &workspace,
+        &main_uri,
+        in_progress,
+        Position { line: 5, character: 1 },
+    )
+    .await;
+
+    println!("completion labels: {:?}", labels);
+
+    // The imported package `other.` should be suggested.
+    assert!(
+        labels.iter().any(|l| l == "other."),
+        "expected 'other.' (imported package name) to be in completion list, got: {:?}",
+        labels
+    );
+}
+
+/// Repro for: when typing a field type inside a message, the LSP should still
+/// suggest imported package names so the user can write `other.OtherMessage`.
+///
+/// This is the most common real-world scenario: the user is inside a message
+/// body, typing the type of a field, and wants to reference a symbol from an
+/// imported proto file by its fully-qualified package path.
+#[tokio::test]
+async fn test_completion_suggests_imported_package_inside_message() {
+    use std::fs;
+    use std::path::PathBuf;
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .try_init();
+
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let dir_path = dir.path().to_path_buf();
+
+    let imported_path: PathBuf = dir_path.join("other.proto");
+    let imported_content = r#"syntax = "proto3";
+package other;
+
+message OtherMessage {
+    string name = 1;
+}
+"#;
+    fs::write(&imported_path, imported_content).unwrap();
+
+    let main_path: PathBuf = dir_path.join("main.proto");
+    let main_content = r#"syntax = "proto3";
+package main;
+
+import "other.proto";
+
+message MainMessage {
+    string name = 1;
+}
+"#;
+    fs::write(&main_path, main_content).unwrap();
+
+    let workspace = WorkspaceManager::new();
+    let main_uri = Url::from_file_path(&main_path).unwrap();
+    workspace.open_file(&main_uri, main_content).await.unwrap();
+
+    // User is typing a field type inside MainMessage, has typed `o`.
+    let in_progress = r#"syntax = "proto3";
+package main;
+
+import "other.proto";
+
+message MainMessage {
+    o
+}
+"#;
+    workspace.open_file(&main_uri, in_progress).await.unwrap();
+
+    // Cursor right after `o` (line 6, character 5).
+    let labels = run_completion(
+        &workspace,
+        &main_uri,
+        in_progress,
+        Position { line: 6, character: 5 },
+    )
+    .await;
+
+    println!("completion labels: {:?}", labels);
+
+    assert!(
+        labels.iter().any(|l| l == "other."),
+        "expected 'other.' (imported package name) to be in completion list inside message, got: {:?}",
+        labels
+    );
+}
+
+/// When the user has typed the package prefix `other.` inside a message, the
+/// LSP should suggest symbols from the imported package (e.g. `OtherMessage`).
+#[tokio::test]
+async fn test_completion_suggests_imported_symbols_after_package_prefix() {
+    use std::fs;
+    use std::path::PathBuf;
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .try_init();
+
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let dir_path = dir.path().to_path_buf();
+
+    let imported_path: PathBuf = dir_path.join("other.proto");
+    let imported_content = r#"syntax = "proto3";
+package other;
+
+message OtherMessage {
+    string name = 1;
+}
+"#;
+    fs::write(&imported_path, imported_content).unwrap();
+
+    let main_path: PathBuf = dir_path.join("main.proto");
+    let main_content = r#"syntax = "proto3";
+package main;
+
+import "other.proto";
+
+message MainMessage {
+    string name = 1;
+}
+"#;
+    fs::write(&main_path, main_content).unwrap();
+
+    let workspace = WorkspaceManager::new();
+    let main_uri = Url::from_file_path(&main_path).unwrap();
+    workspace.open_file(&main_uri, main_content).await.unwrap();
+
+    // User has typed `other.` as a field type inside MainMessage.
+    let in_progress = r#"syntax = "proto3";
+package main;
+
+import "other.proto";
+
+message MainMessage {
+    other.
+}
+"#;
+    workspace.open_file(&main_uri, in_progress).await.unwrap();
+
+    // Cursor right after `other.` (line 6, character 10).
+    let labels = run_completion(
+        &workspace,
+        &main_uri,
+        in_progress,
+        Position { line: 6, character: 10 },
+    )
+    .await;
+
+    println!("completion labels: {:?}", labels);
+
+    assert!(
+        labels.iter().any(|l| l == "OtherMessage"),
+        "expected 'OtherMessage' (imported symbol) to be in completion list after 'other.', got: {:?}",
+        labels
+    );
+}
+
+/// Transitive imports should be resolved recursively: if `main.proto` imports
+/// `a.proto` and `a.proto` imports `b.proto`, symbols from `b.proto` (package
+/// `b`) should be available in `main.proto` completion without `b.proto` ever
+/// being opened in the editor.
+#[tokio::test]
+async fn test_completion_resolves_transitive_imports_recursively() {
+    use std::fs;
+    use std::path::PathBuf;
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .try_init();
+
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let dir_path = dir.path().to_path_buf();
+
+    // b.proto — package `b`, defines DeepMessage.
+    let b_path: PathBuf = dir_path.join("b.proto");
+    fs::write(
+        &b_path,
+        r#"syntax = "proto3";
+package b;
+
+message DeepMessage {
+    string name = 1;
+}
+"#,
+    )
+    .unwrap();
+
+    // a.proto — package `a`, imports b.proto (transitive from main's perspective).
+    let a_path: PathBuf = dir_path.join("a.proto");
+    fs::write(
+        &a_path,
+        r#"syntax = "proto3";
+package a;
+
+import "b.proto";
+
+message AMmessage {
+    string name = 1;
+}
+"#,
+    )
+    .unwrap();
+
+    // main.proto — imports a.proto only. b.proto is a transitive import.
+    let main_path: PathBuf = dir_path.join("main.proto");
+    let main_content = r#"syntax = "proto3";
+package main;
+
+import "a.proto";
+
+message MainMessage {
+    string name = 1;
+}
+"#;
+    fs::write(&main_path, main_content).unwrap();
+
+    let workspace = WorkspaceManager::new();
+    let main_uri = Url::from_file_path(&main_path).unwrap();
+    workspace.open_file(&main_uri, main_content).await.unwrap();
+
+    // Type `b.` inside MainMessage to reference a symbol from the transitive
+    // import b.proto.
+    let in_progress = r#"syntax = "proto3";
+package main;
+
+import "a.proto";
+
+message MainMessage {
+    b.
+}
+"#;
+    workspace.open_file(&main_uri, in_progress).await.unwrap();
+
+    let labels = run_completion(
+        &workspace,
+        &main_uri,
+        in_progress,
+        Position { line: 6, character: 6 },
+    )
+    .await;
+
+    println!("completion labels: {:?}", labels);
+
+    assert!(
+        labels.iter().any(|l| l == "DeepMessage"),
+        "expected 'DeepMessage' (symbol from transitive import b.proto) to be in completion list, got: {:?}",
+        labels
+    );
+}

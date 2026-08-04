@@ -190,9 +190,12 @@ fn get_completion_context(content: &str, position: Position, proto: &ParsedProto
             }
         }
     } else {
-        // No dots - check if it looks like a package name
-        // Only consider it a package name if we're at top level or in specific contexts
-        let is_package_context = at_top_level || (identifier.len() > 1 && !in_message && !in_enum && !in_service);
+        // No dots - check if it looks like a package name.
+        // Package name completion is useful both at top level (declaring a
+        // package) and inside a message/service body (referencing a type from
+        // another package via its fully-qualified name, e.g. `other.Foo`).
+        // Inside enum bodies there are no type references, so skip that context.
+        let is_package_context = at_top_level || !in_enum;
         if identifier.chars().all(|c| c.is_lowercase() || c.is_ascii_digit() || c == '_') && !identifier.is_empty() && is_package_context {
             (None, true, Some(identifier.to_string()))
         } else {
@@ -222,7 +225,11 @@ async fn add_contextual_completions(
     uri: &Url,
     items: &mut Vec<CompletionItem>,
 ) {
-    // If we're typing a package name (without dot), suggest available packages
+    // If we're typing a package name (without dot), suggest available packages.
+    // At top level this is the only useful completion, so we return early. Inside
+    // a message/service body the user may also want built-in types, keywords and
+    // local symbols (they could be typing a field name OR a package-qualified
+    // type), so we fall through and add those afterwards.
     if context.typing_package_name {
         if let Some(partial) = &context.partial_package {
             let symbols_by_package = workspace.get_symbols_by_package_async(uri).await;
@@ -275,7 +282,10 @@ async fn add_contextual_completions(
                 });
             }
         }
-        return;
+        // At top level, package names are the primary completion — skip the rest.
+        if context.at_top_level {
+            return;
+        }
     }
 
     // If we have a package prefix (e.g., "mmsearch."), show symbols from that package
@@ -436,13 +446,14 @@ async fn add_contextual_completions(
     // Add services with priority
     add_services_with_priority(&proto, items, context, priority_base);
 
-    // Add items from imported files with lower priority
-    for import in &proto.imports {
-        if let Some(imported) = workspace.get_imported_file_cached(uri, &import.path) {
-            add_messages_with_priority(&imported, items, context, "5"); // Lowest priority
-            add_enums_with_priority(&imported, items, context, "5");
-            add_services_with_priority(&imported, items, context, "5");
-        }
+    // Add items from imported files with lower priority. Use the async recursive
+    // collector so transitive imports are loaded from disk on demand (not just
+    // files the editor has did_open-ed).
+    let all_imports = workspace.collect_all_imports_async(uri).await;
+    for imported in &all_imports {
+        add_messages_with_priority(&imported, items, context, "5"); // Lowest priority
+        add_enums_with_priority(&imported, items, context, "5");
+        add_services_with_priority(&imported, items, context, "5");
     }
 
     // Add remaining keywords with lowest priority (except extend which gets medium-low priority)
